@@ -24,6 +24,9 @@ cd "$APP_DIR"
 
 export CI=true
 
+# Garante que arquivos sincronizados e node_modules pertençam ao usuário de deploy.
+run_sudo chown -R "$(id -un):$(id -gn)" "$APP_DIR"
+
 if [[ ! -f .env.production ]]; then
   echo "missing $APP_DIR/.env.production"
   exit 1
