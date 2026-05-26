@@ -12,6 +12,14 @@ run_sudo() {
   fi
 }
 
+generate_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+  else
+    tr -dc 'a-f0-9' </dev/urandom | head -c 64
+  fi
+}
+
 cd "$APP_DIR"
 
 if [[ ! -f .env.production ]]; then
@@ -30,9 +38,19 @@ source ./.env.production
 set +a
 
 : "${MEDUSA_DATABASE_URL:?missing MEDUSA_DATABASE_URL in .env.production}"
-: "${MEDUSA_JWT_SECRET:?missing MEDUSA_JWT_SECRET in .env.production}"
-: "${MEDUSA_COOKIE_SECRET:?missing MEDUSA_COOKIE_SECRET in .env.production}"
 : "${MEDUSA_PUBLISHABLE_KEY:?missing MEDUSA_PUBLISHABLE_KEY in .env.production}"
+
+if [[ -z "${MEDUSA_JWT_SECRET:-}" ]]; then
+  MEDUSA_JWT_SECRET="$(generate_secret)"
+  echo "MEDUSA_JWT_SECRET=$MEDUSA_JWT_SECRET" >> .env.production
+  echo "generated MEDUSA_JWT_SECRET in .env.production"
+fi
+
+if [[ -z "${MEDUSA_COOKIE_SECRET:-}" ]]; then
+  MEDUSA_COOKIE_SECRET="$(generate_secret)"
+  echo "MEDUSA_COOKIE_SECRET=$MEDUSA_COOKIE_SECRET" >> .env.production
+  echo "generated MEDUSA_COOKIE_SECRET in .env.production"
+fi
 
 mkdir -p apps/backend apps/storefront
 

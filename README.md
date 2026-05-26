@@ -52,9 +52,17 @@ sudo -u nginx cp /var/www/loja.packetloss.com.br/.env.production{.example,}
 Chaves obrigatórias no `.env.production`:
 
 - `MEDUSA_DATABASE_URL`
-- `MEDUSA_JWT_SECRET`
-- `MEDUSA_COOKIE_SECRET`
 - `MEDUSA_PUBLISHABLE_KEY`
+
+`MEDUSA_JWT_SECRET` e `MEDUSA_COOKIE_SECRET`:
+- se ausentes no primeiro deploy, o script remoto gera automaticamente e salva no `.env.production`.
+- você também pode definir manualmente antes do deploy.
+
+Geração manual recomendada:
+
+```bash
+openssl rand -hex 32
+```
 
 Chaves recomendadas:
 
