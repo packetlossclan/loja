@@ -24,9 +24,6 @@ cd "$APP_DIR"
 
 export CI=true
 
-# Garante que arquivos sincronizados e node_modules pertençam ao usuário de deploy.
-run_sudo chown -R "$(id -un):$(id -gn)" "$APP_DIR"
-
 if [[ ! -f .env.production ]]; then
   echo "missing $APP_DIR/.env.production"
   exit 1
@@ -77,7 +74,12 @@ NEXT_PUBLIC_BASE_URL=https://loja.packetloss.com.br
 NODE_ENV=production
 EOS
 
-"$PNPM_BIN" install --frozen-lockfile --config.confirmModulesPurge=false
+if ! "$PNPM_BIN" install --frozen-lockfile --config.confirmModulesPurge=false; then
+  echo "pnpm install falhou por permissão."
+  echo "Execute uma vez como root e rode o deploy novamente:"
+  echo "  chown -R nginx:nginx $APP_DIR"
+  exit 1
+fi
 "$PNPM_BIN" build
 "$PNPM_BIN" --filter @dtc/backend exec medusa db:migrate
 

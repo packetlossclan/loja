@@ -131,3 +131,9 @@ sudo systemctl status medusa-backend
 sudo systemctl status medusa-storefront
 sudo systemctl status nginx
 ```
+
+Se aparecer erro de permissão no `pnpm install` (arquivos legados com owner `root`), corrija uma única vez:
+
+```bash
+sudo chown -R nginx:nginx /var/www/loja.packetloss.com.br
+```
