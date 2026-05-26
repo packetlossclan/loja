@@ -22,6 +22,8 @@ generate_secret() {
 
 cd "$APP_DIR"
 
+export CI=true
+
 if [[ ! -f .env.production ]]; then
   echo "missing $APP_DIR/.env.production"
   exit 1
@@ -72,7 +74,7 @@ NEXT_PUBLIC_BASE_URL=https://loja.packetloss.com.br
 NODE_ENV=production
 EOS
 
-"$PNPM_BIN" install --frozen-lockfile
+"$PNPM_BIN" install --frozen-lockfile --config.confirmModulesPurge=false
 "$PNPM_BIN" build
 "$PNPM_BIN" --filter @dtc/backend exec medusa db:migrate
 
