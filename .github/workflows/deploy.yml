@@ -15,20 +15,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Setup Node
-        uses: actions/setup-node@v5 
-        with:
-          node-version: 24.16.0
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5 
-        with:
-          version: 11.3.0
-
       - name: Install deploy dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y sshpass rsync ansible
+          sudo apt-get install -y sshpass rsync
 
       - name: Prepare SSH
         run: |
@@ -52,31 +42,12 @@ jobs:
             --exclude '.env.production' \
             ./ "$VPS_USER@$VPS_HOST:$APP_DIR/"
 
-      - name: Run Ansible deploy
+      - name: Run remote deploy script on VPS
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_PASSWORD: ${{ secrets.VPS_SSH_PASSWORD }}
           VPS_BECOME_PASSWORD: ${{ secrets.VPS_BECOME_PASSWORD }}
         run: |
-          cat > inventory.ini <<INVENTORY
-          [loja_prod]
-          $VPS_HOST ansible_port=$VPS_PORT ansible_user=$VPS_USER ansible_ssh_pass='$VPS_SSH_PASSWORD' ansible_become_pass='$VPS_BECOME_PASSWORD'
-
-          [all:vars]
-          ansible_connection=ssh
-          ansible_python_interpreter=/usr/bin/python3
-          INVENTORY
-
-          ansible-galaxy collection install community.general
-
-          ansible-playbook \
-            -i inventory.ini \
-            ansible/playbooks/deploy.yml \
-            -e app_dir="$APP_DIR" \
-            -e app_user="nginx" \
-            -e app_group="nginx" \
-            -e app_domain="loja.packetloss.com.br" \
-            -e api_domain="api.loja.packetloss.com.br" \
-            -e app_title="Packet Loss Store" \
-            -e default_region="br"
+          sshpass -e ssh -p "$VPS_PORT" -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" \
+            "APP_DIR='$APP_DIR' VPS_BECOME_PASSWORD='$VPS_BECOME_PASSWORD' PNPM_BIN='/home/nginx/.local/share/pnpm/pnpm' bash '$APP_DIR/scripts/vps-deploy.sh'"

@@ -14,7 +14,7 @@ Monorepo MedusaJS + Next.js.
 - pnpm `11.3.0`
 - Medusa backend em `apps/backend`
 - Storefront Next.js em `apps/storefront`
-- Deploy via GitHub Actions + Ansible + rsync
+- Deploy via GitHub Actions + rsync + shell remoto
 - Produção: Oracle Linux 10 ARM64 com SELinux ativo
 
 ## Estratégia de configuração
@@ -38,7 +38,7 @@ Esse arquivo **não é sobrescrito** pelo sync (`rsync` exclui `.env.production`
 
 ## Arquivo `.env.production` na VPS
 
-Use como base: [.env.example](/home/lucas/code/pkl/loja/.env.example)
+Use como base: [.env.production.example](/home/lucas/code/pkl/loja/.env.production.example)
 
 Criar no servidor:
 
@@ -68,7 +68,6 @@ Chaves recomendadas:
 ## Scripts de deploy
 
 - [scripts/sync.sh](/home/lucas/code/pkl/loja/scripts/sync.sh): sincroniza arquivos para VPS via rsync (SSH por chave/config local).
-- [scripts/deploy-ansible.sh](/home/lucas/code/pkl/loja/scripts/deploy-ansible.sh): executa playbook Ansible remoto.
 - [scripts/deploy.sh](/home/lucas/code/pkl/loja/scripts/deploy.sh): roda sync + deploy completo.
 
 ### Uso local dos scripts
@@ -82,26 +81,17 @@ export VPS_APP_DIR=/var/www/loja.packetloss.com.br
 scripts/deploy.sh
 ```
 
-Obs.: o script pedirá a senha de `sudo` no momento do Ansible (`--ask-become-pass`).
+Obs.: no deploy local (`scripts/deploy.sh`), o Ansible pedirá senha de sudo interativamente.
 
-## O que o playbook faz
+## O que o script remoto faz
 
-Playbook: [ansible/playbooks/deploy.yml](/home/lucas/code/pkl/loja/ansible/playbooks/deploy.yml)
+Script: [scripts/vps-deploy.sh](/home/lucas/code/pkl/loja/scripts/vps-deploy.sh)
 
-1. Instala pacotes base (`nginx`, utilitários, SELinux tools).
-2. Instala Node.js ARM64 `24.16.0` em `/opt`.
-3. Ativa `pnpm@11.3.0` via `corepack`.
-4. Instala Redis (`redis`) ou fallback para `valkey`.
-5. Garante diretório da app e contexto SELinux.
-6. Ativa `httpd_can_network_connect=1` para Nginx falar com Node.
-7. Lê `.env.production` da VPS e gera:
-   - `apps/backend/.env`
-   - `apps/storefront/.env.local`
-8. Executa `pnpm install`, `pnpm build` e `medusa db:migrate`.
-9. Atualiza serviços systemd:
-   - `medusa-backend`
-   - `medusa-storefront`
-10. Publica configuração Nginx e recarrega.
+1. Lê `.env.production` na VPS e valida chaves obrigatórias.
+2. Gera `apps/backend/.env` e `apps/storefront/.env.local`.
+3. Usa pnpm do usuário `nginx` em `/home/nginx/.local/share/pnpm/pnpm`.
+4. Executa `pnpm install`, `pnpm build` e `medusa db:migrate`.
+5. Reinicia `medusa-backend` e `medusa-storefront`, e recarrega `nginx`.
 
 ## GitHub Actions
 
@@ -110,7 +100,7 @@ Workflow: [.github/workflows/deploy.yml](/home/lucas/code/pkl/loja/.github/workf
 - Trigger: push na `main` e `workflow_dispatch`
 - Usa somente secrets `VPS_*`
 - Sincroniza código para VPS
-- Executa Ansible remoto para build e restart dos serviços
+- Executa `scripts/vps-deploy.sh` na VPS para build, migration e restart dos serviços
 
 ## TLS/Nginx
 
