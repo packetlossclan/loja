@@ -13,12 +13,23 @@
     node_bin_dir: "{{ node_install_dir }}/bin"
     node_link_dir: "/usr/local/bin"
     app_env_file: "{{ app_dir }}/.env.production"
+    app_user: "nginx"
+    app_group: "nginx"
+    node_env: "production"
+    app_domain: "loja.packetloss.com.br"
+    api_domain: "api.loja.packetloss.com.br"
+    backend_port: 9000
+    storefront_port: 8000
+    default_region: "br"
+    app_title: "Packet Loss Store"
+    nginx_ssl_certificate: "/etc/letsencrypt/live/loja.packetloss.com.br/fullchain.pem"
+    nginx_ssl_certificate_key: "/etc/letsencrypt/live/loja.packetloss.com.br/privkey.pem"
 
   pre_tasks:
     - name: Assert OS family is RedHat-compatible
       ansible.builtin.assert:
         that:
-          - ansible_os_family == "RedHat"
+          - ansible_facts["os_family"] == "RedHat"
         fail_msg: "Este playbook foi feito para Oracle Linux/RHEL compatíveis."
 
   tasks:
@@ -67,23 +78,16 @@
         dest: "{{ node_link_dir }}/pnpm"
         state: link
         force: true
+        follow: false
 
-    - name: Try installing redis package
-      ansible.builtin.dnf:
-        name: redis
-        state: present
-      register: redis_install
-      ignore_errors: true
-
-    - name: Fallback install valkey package
+    - name: Install valkey package
       ansible.builtin.dnf:
         name: valkey
         state: present
-      when: redis_install is failed
 
-    - name: Set redis service name
+    - name: Set cache service name
       ansible.builtin.set_fact:
-        redis_service_name: "{{ 'redis' if redis_install is succeeded else 'valkey' }}"
+        redis_service_name: "valkey"
 
     - name: Ensure redis-like service enabled
       ansible.builtin.systemd:
@@ -143,7 +147,7 @@
 
     - name: Build environment map from .env.production
       ansible.builtin.set_fact:
-        app_env: "{{ app_env | default({}) | combine({ (item.split('=', 1)[0]): (item.split('=', 1)[1]) }) }}"
+        app_env: "{{ app_env | default({}) | combine({(item.split('=', 1)[0]): (item.split('=', 1)[1])}) }}"
       loop: "{{ app_env_lines }}"
 
     - name: Validate required keys in .env.production
@@ -169,10 +173,12 @@
           JWT_SECRET={{ app_env.MEDUSA_JWT_SECRET }}
           COOKIE_SECRET={{ app_env.MEDUSA_COOKIE_SECRET }}
           DATABASE_URL={{ app_env.MEDUSA_DATABASE_URL }}
+          MERCADOPAGO_ACCESS_TOKEN={{ app_env.MERCADOPAGO_ACCESS_TOKEN | default('') }}
+          MERCADOPAGO_WEBHOOK_SECRET={{ app_env.MERCADOPAGO_WEBHOOK_SECRET | default('') }}
 
     - name: Render storefront environment file
       ansible.builtin.copy:
-        dest: "{{ app_dir }}/apps/storefront/.env.local"
+        dest: "{{ app_dir }}/apps/storefront-v2/.env.local"
         owner: "{{ app_user }}"
         group: "{{ app_group }}"
         mode: "0600"
@@ -183,39 +189,126 @@
           NEXT_PUBLIC_BASE_URL=https://{{ app_domain }}
           NODE_ENV={{ node_env }}
 
+    - name: Ensure SELinux context for backend env file
+      community.general.sefcontext:
+        target: "{{ app_dir }}/apps/backend/.env"
+        setype: etc_t
+        state: present
+
+    - name: Ensure SELinux context for storefront env file
+      community.general.sefcontext:
+        target: "{{ app_dir }}/apps/storefront-v2/.env.local"
+        setype: etc_t
+        state: present
+
+    - name: Restore SELinux context after env changes
+      ansible.builtin.command: "restorecon -Rv {{ app_dir }}"
+      changed_when: false
+
+    - name: Ensure Ansible remote tmp base exists
+      ansible.builtin.file:
+        path: /tmp/.ansible
+        state: directory
+        mode: "1777"
+
+    - name: Ensure Ansible remote tmp directory exists
+      ansible.builtin.file:
+        path: /tmp/.ansible/tmp
+        state: directory
+        mode: "1777"
+
     - name: Install production dependencies
+      become: true
       become_user: "{{ app_user }}"
       ansible.builtin.command: pnpm install --frozen-lockfile
       args:
         chdir: "{{ app_dir }}"
+      changed_when: false
+
+    - name: Clean previous Next.js cache to reduce disk pressure
+      become: true
+      become_user: "{{ app_user }}"
+      ansible.builtin.file:
+        path: "{{ app_dir }}/apps/storefront-v2/.next/cache"
+        state: absent
+
+    - name: Check free space on app filesystem (KB)
+      ansible.builtin.shell: "set -o pipefail && df -Pk {{ app_dir }} | awk 'NR==2 {print $4}'"
+      register: app_free_kb
+      changed_when: false
+
+    - name: Fail when free disk space is too low for build
+      ansible.builtin.assert:
+        that:
+          - (app_free_kb.stdout | int) > 2097152
+        fail_msg: "Espaço insuficiente em disco para build. Livre: {{ app_free_kb.stdout }} KB (mínimo ~2GB)."
 
     - name: Build workspace
+      become: true
       become_user: "{{ app_user }}"
       ansible.builtin.command: pnpm build
       args:
         chdir: "{{ app_dir }}"
+      changed_when: false
+
+    - name: Render backend production env inside build directory
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/apps/backend/.medusa/server/.env.production"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0600"
+        content: |
+          STORE_CORS={{ app_env.MEDUSA_STORE_CORS | default('https://loja.packetloss.com.br') }}
+          ADMIN_CORS={{ app_env.MEDUSA_ADMIN_CORS | default('https://loja.packetloss.com.br') }}
+          AUTH_CORS={{ app_env.MEDUSA_AUTH_CORS | default('https://loja.packetloss.com.br') }}
+          REDIS_URL={{ app_env.MEDUSA_REDIS_URL | default('redis://127.0.0.1:6379') }}
+          JWT_SECRET={{ app_env.MEDUSA_JWT_SECRET }}
+          COOKIE_SECRET={{ app_env.MEDUSA_COOKIE_SECRET }}
+          DATABASE_URL={{ app_env.MEDUSA_DATABASE_URL }}
+          MERCADOPAGO_ACCESS_TOKEN={{ app_env.MERCADOPAGO_ACCESS_TOKEN | default('') }}
+          MERCADOPAGO_WEBHOOK_SECRET={{ app_env.MERCADOPAGO_WEBHOOK_SECRET | default('') }}
+
+    - name: Ensure backend node_modules is available inside build directory
+      ansible.builtin.file:
+        src: "{{ app_dir }}/apps/backend/node_modules"
+        dest: "{{ app_dir }}/apps/backend/.medusa/server/node_modules"
+        state: link
+        force: true
 
     - name: Run Medusa database migrations
+      become: true
       become_user: "{{ app_user }}"
       ansible.builtin.command: pnpm --filter @dtc/backend exec medusa db:migrate
       args:
         chdir: "{{ app_dir }}"
+      changed_when: false
+
+    - name: Check admin build artifact exists
+      ansible.builtin.stat:
+        path: "{{ app_dir }}/apps/backend/.medusa/server/public/admin/index.html"
+      register: admin_index_stat
+
+    - name: Fail when admin build artifact is missing
+      ansible.builtin.assert:
+        that:
+          - admin_index_stat.stat.exists
+        fail_msg: "Admin build ausente em .medusa/server/public/admin/index.html"
 
     - name: Install backend systemd service
       ansible.builtin.template:
-        src: "{{ playbook_dir }}/../templates/medusa-backend.service.j2"
+        src: "{{ playbook_dir | dirname }}/templates/medusa-backend.service.j2"
         dest: /etc/systemd/system/medusa-backend.service
         mode: "0644"
 
     - name: Install storefront systemd service
       ansible.builtin.template:
-        src: "{{ playbook_dir }}/../templates/medusa-storefront.service.j2"
+        src: "{{ playbook_dir | dirname }}/templates/medusa-storefront.service.j2"
         dest: /etc/systemd/system/medusa-storefront.service
         mode: "0644"
 
     - name: Install nginx vhosts for loja + api
       ansible.builtin.template:
-        src: "{{ playbook_dir }}/../templates/nginx-loja.conf.j2"
+        src: "{{ playbook_dir | dirname }}/templates/nginx-loja.conf.j2"
         dest: /etc/nginx/conf.d/loja.conf
         mode: "0644"
 

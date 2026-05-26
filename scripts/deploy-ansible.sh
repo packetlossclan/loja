@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${VPS_HOST:?missing VPS_HOST}"
-: "${VPS_PORT:?missing VPS_PORT}"
-: "${VPS_USER:?missing VPS_USER}"
-: "${VPS_APP_DIR:?missing VPS_APP_DIR}"
+TMP_INV="$(mktemp)"
+trap 'rm -f "$TMP_INV"' EXIT
+
+cat > "$TMP_INV" <<INVENTORY
+[loja_prod]
+ananke ansible_host=163.176.221.13 ansible_port=2200 ansible_user=root ansible_python_interpreter=/usr/bin/python3 ansible_shell_executable=/bin/bash ansible_ssh_common_args='-o RequestTTY=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR'
+INVENTORY
 
 ANSIBLE_LOCAL_TEMP=./.ansible/tmp ansible-playbook \
-  -i "$VPS_HOST," \
-  -u "$VPS_USER" \
-  -e "ansible_port=$VPS_PORT" \
-  -e "ansible_python_interpreter=/usr/bin/python3" \
+  -i "$TMP_INV" \
   ansible/playbooks/deploy.yml \
-  --ask-become-pass \
-  -e "app_dir=$VPS_APP_DIR"
+  -e "app_dir=/var/www/loja.packetloss.com.br" \
+  -e "app_user=nginx" \
+  -e "app_group=nginx" \
+  -e "app_domain=loja.packetloss.com.br" \
+  -e "api_domain=api.loja.packetloss.com.br" \
+  -e "app_title=Packet Loss Store" \
+  -e "default_region=br"
