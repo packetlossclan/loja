@@ -32,8 +32,8 @@ Esse arquivo **não é sobrescrito** pelo sync (`rsync` exclui `.env.production`
 - `VPS_HOST=163.176.221.13`
 - `VPS_PORT=2200`
 - `VPS_USER=nginx`
-- `VPS_SSH_PASSWORD=...`
-- `VPS_BECOME_PASSWORD=...`
+- `VPS_SSH_PASSWORD=...` (apenas para GitHub Actions)
+- `VPS_BECOME_PASSWORD=...` (apenas para GitHub Actions)
 - `VPS_APP_DIR=/var/www/loja.packetloss.com.br`
 
 ## Arquivo `.env.production` na VPS
@@ -67,7 +67,7 @@ Chaves recomendadas:
 
 ## Scripts de deploy
 
-- [scripts/sync.sh](/home/lucas/code/pkl/loja/scripts/sync.sh): sincroniza arquivos para VPS via rsync/sshpass.
+- [scripts/sync.sh](/home/lucas/code/pkl/loja/scripts/sync.sh): sincroniza arquivos para VPS via rsync (SSH por chave/config local).
 - [scripts/deploy-ansible.sh](/home/lucas/code/pkl/loja/scripts/deploy-ansible.sh): executa playbook Ansible remoto.
 - [scripts/deploy.sh](/home/lucas/code/pkl/loja/scripts/deploy.sh): roda sync + deploy completo.
 
@@ -77,12 +77,12 @@ Chaves recomendadas:
 export VPS_HOST=163.176.221.13
 export VPS_PORT=2200
 export VPS_USER=nginx
-export VPS_SSH_PASSWORD='...'
-export VPS_BECOME_PASSWORD='...'
 export VPS_APP_DIR=/var/www/loja.packetloss.com.br
 
 scripts/deploy.sh
 ```
+
+Obs.: o script pedirá a senha de `sudo` no momento do Ansible (`--ask-become-pass`).
 
 ## O que o playbook faz
 
