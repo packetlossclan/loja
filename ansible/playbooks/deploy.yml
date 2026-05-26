@@ -296,20 +296,20 @@
 
     - name: Install backend systemd service
       ansible.builtin.template:
-        src: "{{ playbook_dir | dirname }}/templates/medusa-backend.service.j2"
+        src: "templates/medusa-backend.service.j2"
         dest: /etc/systemd/system/medusa-backend.service
         mode: "0644"
 
     - name: Install storefront systemd service
       ansible.builtin.template:
-        src: "{{ playbook_dir | dirname }}/templates/medusa-storefront.service.j2"
+        src: "templates/medusa-storefront.service.j2"
         dest: /etc/systemd/system/medusa-storefront.service
         mode: "0644"
 
     - name: Install nginx vhosts for loja + api
       ansible.builtin.template:
-        src: "{{ playbook_dir | dirname }}/templates/nginx-loja.conf.j2"
-        dest: /etc/nginx/conf.d/loja.conf
+        src: "templates/nginx-loja.conf.j2"
+        dest: /etc/nginx/sites.d/08-loja.packetloss.com.br.conf
         mode: "0644"
 
     - name: Test nginx config
