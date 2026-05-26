@@ -195,6 +195,11 @@
         setype: etc_t
         state: present
 
+    # - name: Remove stale storefront .env.production (prevents EACCES during next build)
+    #   ansible.builtin.file:
+    #     path: "{{ app_dir }}/apps/storefront-v2/.env.production"
+    #     state: absent
+
     - name: Ensure SELinux context for storefront env file
       community.general.sefcontext:
         target: "{{ app_dir }}/apps/storefront-v2/.env.local"
