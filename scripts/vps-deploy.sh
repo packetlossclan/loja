@@ -85,6 +85,8 @@ if command -v /usr/sbin/semanage >/dev/null 2>&1; then
     || sudo /usr/sbin/semanage fcontext -m -t etc_t "${APP_DIR}/apps/storefront/\\.env\\.local"
   sudo /usr/sbin/semanage fcontext -a -t etc_t "${APP_DIR}/apps/storefront-v2/\\.env\\.local" 2>/dev/null \
     || sudo /usr/sbin/semanage fcontext -m -t etc_t "${APP_DIR}/apps/storefront-v2/\\.env\\.local"
+  sudo /usr/sbin/semanage fcontext -a -t etc_t "${APP_DIR}/apps/storefront-v2/\\.env\\.production" 2>/dev/null \
+    || sudo /usr/sbin/semanage fcontext -m -t etc_t "${APP_DIR}/apps/storefront-v2/\\.env\\.production"
 fi
 sudo /usr/sbin/restorecon -RF "$APP_DIR" || true
 
