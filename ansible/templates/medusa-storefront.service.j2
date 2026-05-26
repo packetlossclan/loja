@@ -1,0 +1,17 @@
+[Unit]
+Description={{ app_title }} Storefront
+After=network.target
+
+[Service]
+Type=simple
+User={{ app_user }}
+Group={{ app_group }}
+WorkingDirectory={{ app_dir }}/apps/storefront
+Environment=NODE_ENV={{ node_env }}
+EnvironmentFile={{ app_dir }}/apps/storefront/.env.local
+ExecStart=/usr/bin/pnpm start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

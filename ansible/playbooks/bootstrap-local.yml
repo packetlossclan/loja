@@ -1,0 +1,44 @@
+---
+- name: Bootstrap local Medusa workspace (Arch Linux)
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    expected_node_version: "v24.16.0"
+    expected_pnpm_version: "11.3.0"
+    repo_dir: "{{ playbook_dir }}/../.."
+  tasks:
+    - name: Ensure local ansible tmp directory exists
+      ansible.builtin.file:
+        path: "{{ repo_dir }}/.ansible/tmp"
+        state: directory
+        mode: "0755"
+
+    - name: Check node version
+      ansible.builtin.command: node -v
+      register: node_version
+      changed_when: false
+
+    - name: Check pnpm version
+      ansible.builtin.command: pnpm -v
+      register: pnpm_version
+      changed_when: false
+
+    - name: Validate node version
+      ansible.builtin.assert:
+        that:
+          - node_version.stdout == expected_node_version
+        fail_msg: "Node incompatível. Esperado {{ expected_node_version }}, atual {{ node_version.stdout }}"
+
+    - name: Validate pnpm version
+      ansible.builtin.assert:
+        that:
+          - pnpm_version.stdout == expected_pnpm_version
+        fail_msg: "pnpm incompatível. Esperado {{ expected_pnpm_version }}, atual {{ pnpm_version.stdout }}"
+
+    - name: Install project dependencies with pnpm
+      ansible.builtin.command: pnpm install
+      args:
+        chdir: "{{ repo_dir }}"
+      environment:
+        NODE_ENV: development

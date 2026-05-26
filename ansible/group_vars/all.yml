@@ -1,0 +1,17 @@
+---
+app_name: loja
+app_title: "Packet Loss Store"
+app_domain: "loja.packetloss.com.br"
+api_domain: "api.loja.packetloss.com.br"
+
+app_dir: /var/www/loja.packetloss.com.br
+backend_port: 9000
+storefront_port: 8000
+node_env: production
+
+nginx_ssl_certificate: "/etc/letsencrypt/live/loja.packetloss.com.br/fullchain.pem"
+nginx_ssl_certificate_key: "/etc/letsencrypt/live/loja.packetloss.com.br/privkey.pem"
+
+default_region: "br"
+app_user: nginx
+app_group: nginx

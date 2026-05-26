@@ -1,0 +1,246 @@
+---
+- name: Configure and deploy Medusa on Oracle Linux ARM64
+  hosts: loja_prod
+  become: true
+  gather_facts: true
+
+  vars:
+    node_version: "24.16.0"
+    node_dist: "node-v{{ node_version }}-linux-arm64"
+    node_archive: "{{ node_dist }}.tar.xz"
+    node_download_url: "https://nodejs.org/dist/v{{ node_version }}/{{ node_archive }}"
+    node_install_dir: "/opt/{{ node_dist }}"
+    node_bin_dir: "{{ node_install_dir }}/bin"
+    node_link_dir: "/usr/local/bin"
+    app_env_file: "{{ app_dir }}/.env.production"
+
+  pre_tasks:
+    - name: Assert OS family is RedHat-compatible
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == "RedHat"
+        fail_msg: "Este playbook foi feito para Oracle Linux/RHEL compatíveis."
+
+  tasks:
+    - name: Ensure base packages are installed
+      ansible.builtin.dnf:
+        name:
+          - policycoreutils-python-utils
+          - rsync
+          - tar
+          - xz
+          - nginx
+        state: present
+
+    - name: Download Node.js ARM64 archive
+      ansible.builtin.get_url:
+        url: "{{ node_download_url }}"
+        dest: "/tmp/{{ node_archive }}"
+        mode: "0644"
+
+    - name: Extract Node.js archive
+      ansible.builtin.unarchive:
+        src: "/tmp/{{ node_archive }}"
+        dest: /opt
+        remote_src: true
+        creates: "{{ node_install_dir }}"
+
+    - name: Symlink node/npm/npx/corepack
+      ansible.builtin.file:
+        src: "{{ node_bin_dir }}/{{ item }}"
+        dest: "{{ node_link_dir }}/{{ item }}"
+        state: link
+        force: true
+      loop:
+        - node
+        - npm
+        - npx
+        - corepack
+
+    - name: Enable corepack and activate pnpm 11.3.0
+      ansible.builtin.command: corepack prepare pnpm@11.3.0 --activate
+      changed_when: false
+
+    - name: Ensure pnpm shim link
+      ansible.builtin.file:
+        src: "{{ node_bin_dir }}/pnpm"
+        dest: "{{ node_link_dir }}/pnpm"
+        state: link
+        force: true
+
+    - name: Try installing redis package
+      ansible.builtin.dnf:
+        name: redis
+        state: present
+      register: redis_install
+      ignore_errors: true
+
+    - name: Fallback install valkey package
+      ansible.builtin.dnf:
+        name: valkey
+        state: present
+      when: redis_install is failed
+
+    - name: Set redis service name
+      ansible.builtin.set_fact:
+        redis_service_name: "{{ 'redis' if redis_install is succeeded else 'valkey' }}"
+
+    - name: Ensure redis-like service enabled
+      ansible.builtin.systemd:
+        name: "{{ redis_service_name }}"
+        state: started
+        enabled: true
+
+    - name: Ensure app directory exists
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0755"
+
+    - name: Check if .env.production exists on VPS
+      ansible.builtin.stat:
+        path: "{{ app_env_file }}"
+      register: app_env_file_stat
+
+    - name: Fail when .env.production is missing
+      ansible.builtin.assert:
+        that:
+          - app_env_file_stat.stat.exists
+        fail_msg: "Arquivo {{ app_env_file }} não encontrado. Crie-o na VPS antes do deploy."
+
+    - name: Ensure SELinux context for app directory
+      community.general.sefcontext:
+        target: "{{ app_dir }}(/.*)?"
+        setype: usr_t
+        state: present
+
+    - name: Restore SELinux context on app directory
+      ansible.builtin.command: "restorecon -Rv {{ app_dir }}"
+      changed_when: false
+
+    - name: Allow Nginx to proxy to Node ports with SELinux
+      ansible.builtin.command: setsebool -P httpd_can_network_connect 1
+      changed_when: false
+
+    - name: Load .env.production file from VPS
+      ansible.builtin.slurp:
+        src: "{{ app_env_file }}"
+      register: app_env_raw
+
+    - name: Parse .env.production lines
+      ansible.builtin.set_fact:
+        app_env_lines: >-
+          {{
+            (app_env_raw.content | b64decode).splitlines()
+            | map('trim')
+            | reject('equalto', '')
+            | reject('match', '^#')
+            | select('search', '=')
+            | list
+          }}
+
+    - name: Build environment map from .env.production
+      ansible.builtin.set_fact:
+        app_env: "{{ app_env | default({}) | combine({ (item.split('=', 1)[0]): (item.split('=', 1)[1]) }) }}"
+      loop: "{{ app_env_lines }}"
+
+    - name: Validate required keys in .env.production
+      ansible.builtin.assert:
+        that:
+          - app_env.MEDUSA_DATABASE_URL is defined
+          - app_env.MEDUSA_JWT_SECRET is defined
+          - app_env.MEDUSA_COOKIE_SECRET is defined
+          - app_env.MEDUSA_PUBLISHABLE_KEY is defined
+        fail_msg: "Faltam variáveis obrigatórias em {{ app_env_file }}."
+
+    - name: Render backend environment file
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/apps/backend/.env"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0600"
+        content: |
+          STORE_CORS={{ app_env.MEDUSA_STORE_CORS | default('https://loja.packetloss.com.br') }}
+          ADMIN_CORS={{ app_env.MEDUSA_ADMIN_CORS | default('https://loja.packetloss.com.br') }}
+          AUTH_CORS={{ app_env.MEDUSA_AUTH_CORS | default('https://loja.packetloss.com.br') }}
+          REDIS_URL={{ app_env.MEDUSA_REDIS_URL | default('redis://127.0.0.1:6379') }}
+          JWT_SECRET={{ app_env.MEDUSA_JWT_SECRET }}
+          COOKIE_SECRET={{ app_env.MEDUSA_COOKIE_SECRET }}
+          DATABASE_URL={{ app_env.MEDUSA_DATABASE_URL }}
+
+    - name: Render storefront environment file
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/apps/storefront/.env.local"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0600"
+        content: |
+          NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY={{ app_env.MEDUSA_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_MEDUSA_BACKEND_URL=https://{{ app_env.API_DOMAIN | default(api_domain) }}
+          NEXT_PUBLIC_DEFAULT_REGION={{ app_env.NEXT_PUBLIC_DEFAULT_REGION | default(default_region) }}
+          NEXT_PUBLIC_BASE_URL=https://{{ app_domain }}
+          NODE_ENV={{ node_env }}
+
+    - name: Install production dependencies
+      become_user: "{{ app_user }}"
+      ansible.builtin.command: pnpm install --frozen-lockfile
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Build workspace
+      become_user: "{{ app_user }}"
+      ansible.builtin.command: pnpm build
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Run Medusa database migrations
+      become_user: "{{ app_user }}"
+      ansible.builtin.command: pnpm --filter @dtc/backend exec medusa db:migrate
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Install backend systemd service
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/medusa-backend.service.j2"
+        dest: /etc/systemd/system/medusa-backend.service
+        mode: "0644"
+
+    - name: Install storefront systemd service
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/medusa-storefront.service.j2"
+        dest: /etc/systemd/system/medusa-storefront.service
+        mode: "0644"
+
+    - name: Install nginx vhosts for loja + api
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/nginx-loja.conf.j2"
+        dest: /etc/nginx/conf.d/loja.conf
+        mode: "0644"
+
+    - name: Test nginx config
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable and restart backend
+      ansible.builtin.systemd:
+        name: medusa-backend
+        state: restarted
+        enabled: true
+
+    - name: Enable and restart storefront
+      ansible.builtin.systemd:
+        name: medusa-storefront
+        state: restarted
+        enabled: true
+
+    - name: Enable and reload nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+        enabled: true
